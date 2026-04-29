@@ -1,137 +1,91 @@
-import React, { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
-import ServiceCard from '../components/servicios/ServiceCard'
-import ServiceFilter from '../components/servicios/ServiceFilter'
-import { SERVICE_CATEGORIES } from '../lib/serviceSchema'
-
-interface Service {
-  id: string
-  title: string
-  description: string
-  price: number
-  duration_minutes: number
-  category: string
-  clinic_id: string
-  clinics?: { name: string }
-}
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import ServiceCard from '../components/servicios/ServiceCard';
+import ServiceFilter from '../components/servicios/ServiceFilter';
+import { Container, Typography, Grid, Skeleton, Box } from '@mui/material';
 
 export default function Servicios() {
-  const [services, setServices] = useState<Service[]>([])
-  const [filteredServices, setFilteredServices] = useState<Service[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [filters, setFilters] = useState({ search: '', category: '' })
+  const [servicios, setServicios] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
 
   useEffect(() => {
-    fetchServices()
-  }, [])
-
-  const fetchServices = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const { data, error: fetchError } = await supabase
+    const fetchServicios = async () => {
+      setLoading(true);
+      let query = supabase
         .from('servicios')
-        .select('*, clinics(name)')
-        .order('created_at', { ascending: false })
+        .select(`
+          *,
+          prestadores(nombre_comercial, direccion),
+          categorias_servicio(nombre)
+        `)
+        .eq('estado', 'ACTIVO')
+        .order('creado_at', { ascending: false });
 
-      if (fetchError) throw fetchError
-      
-      const transformedData = (data || []).map((service: any) => ({
-        ...service,
-        clinic_name: service.clinics?.name || 'Clínica desconocida'
-      }))
-      
-      setServices(transformedData)
-      applyFilters(transformedData, filters)
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Error al cargar servicios'
-      )
-      console.error('Error fetching services:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+      if (search) {
+        query = query.ilike('nombre', `%${search}%`);
+      }
+      if (category) {
+        query = query.eq('categoria_id', category);
+      }
 
-  const applyFilters = (servicesToFilter: Service[], currentFilters: typeof filters) => {
-    let filtered = servicesToFilter
+      const { data } = await query;
+      if (data) setServicios(data);
+      setLoading(false);
+    };
 
-    if (currentFilters.search) {
-      const searchLower = currentFilters.search.toLowerCase()
-      filtered = filtered.filter(
-        (s) =>
-          s.title.toLowerCase().includes(searchLower) ||
-          s.description.toLowerCase().includes(searchLower)
-      )
-    }
+    const debounce = setTimeout(() => {
+      fetchServicios();
+    }, 500);
 
-    if (currentFilters.category) {
-      filtered = filtered.filter((s) => s.category === currentFilters.category)
-    }
-
-    setFilteredServices(filtered)
-  }
-
-  const handleFilterChange = (newFilters: typeof filters) => {
-    setFilters(newFilters)
-    applyFilters(services, newFilters)
-  }
+    return () => clearTimeout(debounce);
+  }, [search, category]);
 
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
-      <h1 style={{ marginBottom: '24px', color: '#333' }}>Catálogo de Servicios</h1>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Typography variant="h4" component="h1" gutterBottom fontWeight="bold">
+        Explorar Servicios
+      </Typography>
 
-      {error && (
-        <div style={{
-          padding: '12px',
-          backgroundColor: '#fee',
-          color: '#c33',
-          borderRadius: '4px',
-          marginBottom: '16px'
-        }}>
-          Error: {error}
-        </div>
-      )}
-
-      <ServiceFilter
-        categories={SERVICE_CATEGORIES}
-        onFilterChange={handleFilterChange}
+      <ServiceFilter 
+        search={search} 
+        setSearch={setSearch} 
+        category={category} 
+        setCategory={setCategory} 
       />
 
-      {loading && (
-        <div style={{
-          textAlign: 'center',
-          padding: '40px 20px',
-          color: '#999'
-        }}>
-          Cargando servicios...
-        </div>
+      {loading ? (
+        <Grid container spacing={3}>
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Grid item xs={12} sm={6} md={4} key={i}>
+              <Box sx={{ height: 250 }}>
+                <Skeleton variant="rectangular" height={150} sx={{ borderRadius: 2 }} />
+                <Skeleton variant="text" sx={{ mt: 1 }} />
+                <Skeleton variant="text" width="60%" />
+              </Box>
+            </Grid>
+          ))}
+        </Grid>
+      ) : (
+        <>
+          {servicios.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 8 }}>
+              <Typography variant="h6" color="text.secondary">
+                No se encontraron servicios que coincidan con tu búsqueda.
+              </Typography>
+            </Box>
+          ) : (
+            <Grid container spacing={3}>
+              {servicios.map((s) => (
+                <Grid item xs={12} sm={6} md={4} key={s.id}>
+                  <ServiceCard service={s} />
+                </Grid>
+              ))}
+            </Grid>
+          )}
+        </>
       )}
-
-      {!loading && filteredServices.length === 0 && (
-        <div style={{
-          textAlign: 'center',
-          padding: '40px 20px',
-          color: '#999',
-          backgroundColor: '#f9f9f9',
-          borderRadius: '4px'
-        }}>
-          {services.length === 0
-            ? 'No hay servicios disponibles en este momento.'
-            : 'No se encontraron servicios que coincidan con los filtros.'}
-        </div>
-      )}
-
-      <div>
-        {filteredServices.map((service) => (
-          <ServiceCard
-            key={service.id}
-            service={service}
-            showClinicName={true}
-          />
-        ))}
-      </div>
-    </div>
-  )
+    </Container>
+  );
 }

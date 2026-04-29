@@ -1,118 +1,89 @@
-import React from 'react'
+import React from 'react';
+import { Box, Typography, Paper, Chip } from '@mui/material';
+import { APPOINTMENT_STATUS_COLORS } from '../../lib/appointmentSchema';
 
-interface Appointment {
-  id: string
-  scheduled_at: string
-  services?: { title: string }
-  caninos?: { name: string }
-  status: string
-}
+export default function SimpleCalendar({ citas, onSelectDate }: { citas: any[], onSelectDate?: (date: Date) => void }) {
+  const today = new Date();
+  
+  // Calculate start of week (Monday)
+  const start = new Date(today);
+  const dayOfWeek = start.getDay();
+  const diff = start.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+  start.setDate(diff);
+  start.setHours(0,0,0,0);
 
-interface SimpleCalendarProps {
-  appointments: Appointment[]
-  startDate?: Date
-}
+  const days = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
 
-export default function SimpleCalendar({
-  appointments,
-  startDate = new Date()
-}: SimpleCalendarProps) {
-  // Get Monday of the current week
-  const getMonday = (date: Date) => {
-    const d = new Date(date)
-    const day = d.getDay()
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-    return new Date(d.setDate(diff))
-  }
-
-  const monday = getMonday(startDate)
-  const days = []
-
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(monday)
-    date.setDate(date.getDate() + i)
-    days.push(date)
-  }
-
-  const getDayAppointments = (date: Date) => {
-    return appointments.filter((apt) => {
-      const aptDate = new Date(apt.scheduled_at)
-      return (
-        aptDate.toLocaleDateString('es-CO') === date.toLocaleDateString('es-CO')
-      )
-    })
-  }
-
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      requested: '#FFA500',
-      accepted: '#4CAF50',
-      declined: '#f44336',
-      completed: '#2196F3',
-      cancelled: '#9E9E9E'
-    }
-    return colors[status] || '#999'
-  }
+  const isSameDay = (d1: Date, d2: Date) => 
+    d1.getFullYear() === d2.getFullYear() && 
+    d1.getMonth() === d2.getMonth() && 
+    d1.getDate() === d2.getDate();
 
   return (
-    <div style={{ overflowX: 'auto', marginBottom: '20px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', minWidth: '700px' }}>
-        {days.map((date, idx) => {
-          const dayAppointments = getDayAppointments(date)
-          const isToday = date.toLocaleDateString('es-CO') === new Date().toLocaleDateString('es-CO')
+    <Box sx={{ mt: 4 }}>
+      <Typography variant="h6" gutterBottom fontWeight="bold">
+        Calendario de esta semana
+      </Typography>
+      
+      <Box sx={{ display: 'flex', gap: 2, overflowX: 'auto', pb: 2 }}>
+        {days.map((day, idx) => {
+          // Find appointments for this day
+          const dayCitas = citas.filter(c => isSameDay(new Date(c.fecha_hora_cita), day));
+          const isToday = isSameDay(day, today);
 
           return (
-            <div
-              key={idx}
-              style={{
-                border: isToday ? '2px solid #0066cc' : '1px solid #e0e0e0',
-                borderRadius: '8px',
-                padding: '12px',
-                backgroundColor: isToday ? '#f0f7ff' : '#fff',
-                minHeight: '200px'
+            <Paper 
+              key={idx} 
+              elevation={isToday ? 3 : 1}
+              sx={{ 
+                minWidth: 150, 
+                p: 2, 
+                borderRadius: 2,
+                border: isToday ? 2 : 1,
+                borderColor: isToday ? 'primary.main' : 'divider',
+                bgcolor: isToday ? 'primary.50' : 'background.paper',
+                cursor: onSelectDate ? 'pointer' : 'default',
+                '&:hover': onSelectDate ? { bgcolor: 'action.hover' } : {}
               }}
+              onClick={() => onSelectDate && onSelectDate(day)}
             >
-              <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: '#333' }}>
-                {date.toLocaleDateString('es-CO', { weekday: 'short' })}
-                <br />
-                {date.getDate()}
-              </h4>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {dayAppointments.length === 0 ? (
-                  <p style={{ fontSize: '12px', color: '#ccc', margin: '0' }}>Sin citas</p>
+              <Typography variant="subtitle2" color="text.secondary" textTransform="uppercase" fontWeight="bold">
+                {new Intl.DateTimeFormat('es-ES', { weekday: 'long' }).format(day)}
+              </Typography>
+              <Typography variant="h5" fontWeight="bold" gutterBottom color={isToday ? 'primary.main' : 'text.primary'}>
+                {new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' }).format(day)}
+              </Typography>
+              
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2 }}>
+                {dayCitas.length === 0 ? (
+                  <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic' }}>
+                    Sin citas
+                  </Typography>
                 ) : (
-                  dayAppointments.map((apt) => {
-                    const aptTime = new Date(apt.scheduled_at).toLocaleTimeString('es-CO', {
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })
+                  dayCitas.map(c => {
+                    const statusColor = APPOINTMENT_STATUS_COLORS[c.estado as keyof typeof APPOINTMENT_STATUS_COLORS] || 'default';
+                    const timeStr = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' }).format(new Date(c.fecha_hora_cita));
                     return (
-                      <div
-                        key={apt.id}
-                        style={{
-                          padding: '6px',
-                          backgroundColor: getStatusColor(apt.status),
-                          color: 'white',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          textAlign: 'center'
-                        }}
-                        title={`${apt.services?.title} - ${apt.caninos?.name}`}
-                      >
-                        <div style={{ fontWeight: 'bold' }}>{aptTime}</div>
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {apt.services?.title}
-                        </div>
-                      </div>
-                    )
+                      <Chip 
+                        key={c.id}
+                        label={`${timeStr} - ${c.servicios?.nombre || 'Cita'}`}
+                        size="small"
+                        color={statusColor as any}
+                        variant="outlined"
+                        sx={{ justifyContent: 'flex-start', maxWidth: '100%' }}
+                      />
+                    );
                   })
                 )}
-              </div>
-            </div>
-          )
+              </Box>
+            </Paper>
+          );
         })}
-      </div>
-    </div>
-  )
+      </Box>
+    </Box>
+  );
 }

@@ -1,304 +1,251 @@
-import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
-import AppointmentCard from '../components/servicios/AppointmentCard'
-import SimpleCalendar from '../components/servicios/SimpleCalendar'
-
-interface Appointment {
-  id: string
-  service_id: string
-  pet_id: string
-  owner_id: string
-  scheduled_at: string
-  status: string
-  notes?: string
-  services?: { title: string; duration_minutes: number; price: number }
-  caninos?: { name: string }
-  clinics?: { name: string }
-}
+import React, { useEffect, useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthProvider';
+import SimpleCalendar from '../components/servicios/SimpleCalendar';
+import AppointmentCard from '../components/servicios/AppointmentCard';
+import {
+  Container, Typography, Box, CircularProgress, Select, MenuItem,
+  FormControl, InputLabel, ToggleButtonGroup, ToggleButton,
+  Grid, Button, Dialog, DialogTitle, DialogContent, DialogActions,
+  List, ListItem, ListItemText, Divider, Chip
+} from '@mui/material';
+import ListIcon from '@mui/icons-material/List';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUS_COLORS } from '../lib/appointmentSchema';
 
 export default function CitasGestionar() {
-  const navigate = useNavigate()
-  const [user, setUser] = useState<any>(null)
-  const [appointments, setAppointments] = useState<Appointment[]>([])
-  const [filteredAppointments, setFilteredAppointments] = useState<Appointment[]>([])
-  const [clinicId, setClinicId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list')
+  const { user } = useAuth();
+  const [citas, setCitas] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [filter, setFilter] = useState('');
+
+  // Status-change modal
+  const [openModal, setOpenModal] = useState(false);
+  const [selectedCita, setSelectedCita] = useState<any>(null);
+  const [newStatus, setNewStatus] = useState('');
+
+  // Calendar day-click modal
+  const [openDayModal, setOpenDayModal] = useState(false);
+  const [dayModalDate, setDayModalDate] = useState<Date | null>(null);
+  const [dayCitas, setDayCitas] = useState<any[]>([]);
+
+  const fetchCitas = async () => {
+    if (!user) return;
+    setLoading(true);
+
+    const { data: prestador } = await supabase
+      .from('prestadores')
+      .select('id')
+      .eq('usuario_id', user.id)
+      .single();
+
+    if (prestador) {
+      let query = supabase
+        .from('citas')
+        .select(`
+          *,
+          servicios(nombre),
+          caninos(nombre),
+          propietarios(nombre, apellido, telefono)
+        `)
+        .eq('prestador_id', prestador.id)
+        .order('fecha_hora_cita', { ascending: false });
+
+      if (filter) query = query.eq('estado', filter);
+
+      const { data } = await query;
+      if (data) setCitas(data);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const getUser = async () => {
-      const {
-        data: { user },
-        error: authError
-      } = await supabase.auth.getUser()
-      if (authError || !user) {
-        navigate('/auth')
-        return
-      }
-      setUser(user)
-      await fetchUserClinic(user.id)
-    }
-    getUser()
-  }, [navigate])
+    fetchCitas();
+  }, [user, filter]);
 
-  const fetchUserClinic = async (userId: string) => {
-    try {
-      const { data } = await supabase
-        .from('staff')
-        .select('clinic_id')
-        .eq('user_id', userId)
-        .single()
+  const handleUpdateStatus = async () => {
+    if (!selectedCita || !newStatus) return;
+    await supabase.from('citas').update({ estado: newStatus }).eq('id', selectedCita.id);
+    setOpenModal(false);
+    fetchCitas();
+  };
 
-      if (data?.clinic_id) {
-        setClinicId(data.clinic_id)
-        await fetchClinicAppointments(data.clinic_id)
-      } else {
-        setError('No se encontró clínica asociada a tu usuario')
-      }
-    } catch (err) {
-      console.error('Error fetching user clinic:', err)
-      setError('Error al determinar tu clínica')
-    }
-  }
+  const openStatusModal = (cita: any) => {
+    setSelectedCita(cita);
+    setNewStatus(cita.estado);
+    setOpenModal(true);
+  };
 
-  const fetchClinicAppointments = async (cId: string) => {
-    try {
-      setLoading(true)
-      setError(null)
-      const { data, error: fetchError } = await supabase
-        .from('citas')
-        .select('*, servicios(title, duration_minutes, price), caninos(name)')
-        .eq('clinic_id', cId)
-        .order('scheduled_at', { ascending: true })
+  const isSameDay = (d1: Date, d2: Date) =>
+    d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getDate() === d2.getDate();
 
-      if (fetchError) throw fetchError
-      setAppointments(data || [])
-      applyStatusFilter(data || [], statusFilter)
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Error al cargar citas'
-      )
-      console.error('Error fetching appointments:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const applyStatusFilter = (data: Appointment[], status: string) => {
-    if (status === 'all') {
-      setFilteredAppointments(data)
-    } else {
-      setFilteredAppointments(data.filter((apt) => apt.status === status))
-    }
-  }
-
-  const handleStatusChange = (newStatus: string) => {
-    setStatusFilter(newStatus)
-    applyStatusFilter(appointments, newStatus)
-  }
-
-  const handleAcceptAppointment = async (appointmentId: string) => {
-    try {
-      setActionLoading(appointmentId)
-      const { error: updateError } = await supabase
-        .from('citas')
-        .update({ status: 'accepted' })
-        .eq('id', appointmentId)
-
-      if (updateError) throw updateError
-
-      setAppointments((prev) =>
-        prev.map((apt) =>
-          apt.id === appointmentId ? { ...apt, status: 'accepted' } : apt
-        )
-      )
-      applyStatusFilter(
-        appointments.map((apt) =>
-          apt.id === appointmentId ? { ...apt, status: 'accepted' } : apt
-        ),
-        statusFilter
-      )
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Error al aceptar cita'
-      )
-      console.error('Error accepting appointment:', err)
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const handleDeclineAppointment = async (appointmentId: string) => {
-    if (!confirm('¿Estás seguro de que deseas rechazar esta cita?')) return
-
-    try {
-      setActionLoading(appointmentId)
-      const { error: updateError } = await supabase
-        .from('citas')
-        .update({ status: 'declined' })
-        .eq('id', appointmentId)
-
-      if (updateError) throw updateError
-
-      setAppointments((prev) =>
-        prev.map((apt) =>
-          apt.id === appointmentId ? { ...apt, status: 'declined' } : apt
-        )
-      )
-      applyStatusFilter(
-        appointments.map((apt) =>
-          apt.id === appointmentId ? { ...apt, status: 'declined' } : apt
-        ),
-        statusFilter
-      )
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Error al rechazar cita'
-      )
-      console.error('Error declining appointment:', err)
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  if (!user) {
-    return (
-      <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-        Cargando...
-      </div>
-    )
-  }
+  const handleCalendarDayClick = (date: Date) => {
+    const found = citas.filter((c) => isSameDay(new Date(c.fecha_hora_cita), date));
+    setDayModalDate(date);
+    setDayCitas(found);
+    setOpenDayModal(true);
+  };
 
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px' }}>
-      <h1 style={{ marginBottom: '24px', color: '#333' }}>Gestionar Citas</h1>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 4 }}>
+        <Typography variant="h4" component="h1" fontWeight="bold">
+          Gestionar Citas
+        </Typography>
 
-      {error && (
-        <div
-          style={{
-            padding: '12px',
-            backgroundColor: '#fee',
-            color: '#c33',
-            borderRadius: '4px',
-            marginBottom: '16px'
-          }}
-        >
-          Error: {error}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', alignItems: 'center' }}>
-        <div>
-          <label style={{ fontSize: '14px', fontWeight: 'bold', marginRight: '8px' }}>
-            Filtrar por estado:
-          </label>
-          <select
-            value={statusFilter}
-            onChange={(e) => handleStatusChange(e.target.value)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: '4px',
-              border: '1px solid #ddd',
-              fontSize: '14px'
-            }}
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <ToggleButtonGroup
+            value={view}
+            exclusive
+            onChange={(_, val) => val && setView(val)}
+            size="small"
           >
-            <option value="all">Todas las citas</option>
-            <option value="requested">Solicitadas</option>
-            <option value="accepted">Aceptadas</option>
-            <option value="declined">Rechazadas</option>
-            <option value="completed">Completadas</option>
-            <option value="cancelled">Canceladas</option>
-          </select>
-        </div>
+            <ToggleButton value="list"><ListIcon /></ToggleButton>
+            <ToggleButton value="calendar"><CalendarMonthIcon /></ToggleButton>
+          </ToggleButtonGroup>
 
-        <div style={{ marginLeft: 'auto' }}>
-          <label style={{ fontSize: '14px', fontWeight: 'bold', marginRight: '8px' }}>
-            Vista:
-          </label>
-          <button
-            onClick={() => setViewMode('list')}
-            style={{
-              padding: '8px 12px',
-              marginRight: '8px',
-              backgroundColor: viewMode === 'list' ? '#0066cc' : '#ccc',
-              color: viewMode === 'list' ? 'white' : '#333',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
-          >
-            Lista
-          </button>
-          <button
-            onClick={() => setViewMode('calendar')}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: viewMode === 'calendar' ? '#0066cc' : '#ccc',
-              color: viewMode === 'calendar' ? 'white' : '#333',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
-          >
-            Calendario
-          </button>
-        </div>
-      </div>
+          <FormControl sx={{ minWidth: 150 }} size="small">
+            <InputLabel id="filter-label">Estado</InputLabel>
+            <Select
+              labelId="filter-label"
+              value={filter}
+              label="Estado"
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <MenuItem value="">Todas</MenuItem>
+              <MenuItem value="SOLICITADA">Solicitadas</MenuItem>
+              <MenuItem value="ACEPTADA">Aceptadas</MenuItem>
+              <MenuItem value="RECHAZADA">Rechazadas</MenuItem>
+              <MenuItem value="COMPLETADA">Completadas</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+      </Box>
 
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>
-          Cargando citas...
-        </div>
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+          <CircularProgress />
+        </Box>
+      ) : view === 'calendar' ? (
+        <SimpleCalendar citas={citas} onSelectDate={handleCalendarDayClick} />
+      ) : (
+        <Grid container spacing={3}>
+          {citas.length === 0 ? (
+            <Grid item xs={12}>
+              <Box sx={{ textAlign: 'center', py: 8, bgcolor: 'background.paper', borderRadius: 2 }}>
+                <Typography variant="h6" color="text.secondary">
+                  No hay citas registradas.
+                </Typography>
+              </Box>
+            </Grid>
+          ) : (
+            citas.map((cita) => (
+              <Grid item xs={12} md={6} key={cita.id}>
+                <Box sx={{ position: 'relative' }}>
+                  <AppointmentCard appointment={cita} isPrestador={true} />
+                  <Button
+                    variant="contained"
+                    color="secondary"
+                    size="small"
+                    onClick={() => openStatusModal(cita)}
+                    sx={{ position: 'absolute', top: 16, right: 16 }}
+                  >
+                    Cambiar Estado
+                  </Button>
+                </Box>
+              </Grid>
+            ))
+          )}
+        </Grid>
       )}
 
-      {!loading && filteredAppointments.length === 0 && (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '40px 20px',
-            color: '#999',
-            backgroundColor: '#f9f9f9',
-            borderRadius: '4px'
-          }}
-        >
-          {appointments.length === 0
-            ? 'No hay citas en tu clínica aún.'
-            : `No hay citas con estado "${statusFilter}".`}
-        </div>
-      )}
+      {/* Status-change dialog */}
+      <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Actualizar Estado de la Cita</DialogTitle>
+        <DialogContent dividers>
+          <FormControl fullWidth sx={{ mt: 2 }}>
+            <InputLabel id="new-status-label">Nuevo Estado</InputLabel>
+            <Select
+              labelId="new-status-label"
+              value={newStatus}
+              label="Nuevo Estado"
+              onChange={(e) => setNewStatus(e.target.value)}
+            >
+              <MenuItem value="SOLICITADA">Solicitada</MenuItem>
+              <MenuItem value="ACEPTADA">Aceptada</MenuItem>
+              <MenuItem value="RECHAZADA">Rechazada</MenuItem>
+              <MenuItem value="REPROGRAMADA">Reprogramada</MenuItem>
+              <MenuItem value="COMPLETADA">Completada</MenuItem>
+              <MenuItem value="CANCELADA">Cancelada</MenuItem>
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setOpenModal(false)}>Cancelar</Button>
+          <Button onClick={handleUpdateStatus} variant="contained" color="primary">Guardar</Button>
+        </DialogActions>
+      </Dialog>
 
-      {!loading && viewMode === 'calendar' && appointments.length > 0 && (
-        <>
-          <h2 style={{ fontSize: '16px', marginBottom: '16px', color: '#333' }}>
-            Calendario semanal
-          </h2>
-          <SimpleCalendar appointments={appointments} />
-        </>
-      )}
-
-      {!loading && viewMode === 'list' && filteredAppointments.length > 0 && (
-        <div>
-          <h2 style={{ marginTop: '24px', marginBottom: '16px' }}>
-            Citas ({filteredAppointments.length})
-          </h2>
-          {filteredAppointments.map((appointment) => (
-            <AppointmentCard
-              key={appointment.id}
-              appointment={appointment}
-              onAccept={handleAcceptAppointment}
-              onDecline={handleDeclineAppointment}
-              isStaff={true}
-              isLoading={actionLoading === appointment.id}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
+      {/* Calendar day-detail dialog */}
+      <Dialog open={openDayModal} onClose={() => setOpenDayModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Citas del{' '}
+          {dayModalDate
+            ? new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long' }).format(dayModalDate)
+            : ''}
+        </DialogTitle>
+        <DialogContent dividers>
+          {dayCitas.length === 0 ? (
+            <Typography color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
+              No hay citas para este día.
+            </Typography>
+          ) : (
+            <List disablePadding>
+              {dayCitas.map((c, idx) => {
+                const statusColor = APPOINTMENT_STATUS_COLORS[c.estado as keyof typeof APPOINTMENT_STATUS_COLORS] || 'default';
+                const timeStr = new Intl.DateTimeFormat('es-ES', { hour: '2-digit', minute: '2-digit' }).format(new Date(c.fecha_hora_cita));
+                return (
+                  <React.Fragment key={c.id}>
+                    {idx > 0 && <Divider />}
+                    <ListItem
+                      secondaryAction={
+                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          <Chip
+                            label={APPOINTMENT_STATUS_LABELS[c.estado as keyof typeof APPOINTMENT_STATUS_LABELS] || c.estado}
+                            color={statusColor as any}
+                            size="small"
+                          />
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => {
+                              setOpenDayModal(false);
+                              openStatusModal(c);
+                            }}
+                          >
+                            Editar
+                          </Button>
+                        </Box>
+                      }
+                    >
+                      <ListItemText
+                        primary={`${timeStr} — ${c.servicios?.nombre || 'Cita'}`}
+                        secondary={`${c.caninos?.nombre || ''} · ${c.propietarios?.nombre || ''} ${c.propietarios?.apellido || ''}`}
+                      />
+                    </ListItem>
+                  </React.Fragment>
+                );
+              })}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDayModal(false)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
+  );
 }

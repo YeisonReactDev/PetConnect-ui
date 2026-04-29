@@ -1,55 +1,56 @@
-import React from 'react'
-import { Link } from 'react-router-dom'
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { Card, CardContent, CardActions, Typography, Button, Chip, Box } from '@mui/material';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
-interface Service {
-  id: string
-  title: string
-  description: string
-  price: number
-  duration_minutes: number
-  category: string
-  clinic_id: string
-  clinic_name?: string
-}
-
-interface ServiceCardProps {
-  service: Service
-  showClinicName?: boolean
-}
-
-export default function ServiceCard({ service, showClinicName = false }: ServiceCardProps) {
+export default function ServiceCard({ service }: { service: any }) {
   return (
-    <div style={{
-      border: '1px solid #e0e0e0',
-      borderRadius: '8px',
-      padding: '16px',
-      marginBottom: '12px',
-      backgroundColor: '#f9f9f9'
-    }}>
-      <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', color: '#333' }}>
-        <Link to={`/servicios/${service.id}`} style={{ color: '#0066cc', textDecoration: 'none' }}>
-          {service.title}
-        </Link>
-      </h3>
-      {showClinicName && (
-        <p style={{ margin: '4px 0', fontSize: '14px', color: '#666' }}>
-          <strong>Clínica:</strong> {service.clinic_name}
-        </p>
-      )}
-      <p style={{ margin: '4px 0', fontSize: '14px', color: '#666' }}>
-        <strong>Categoría:</strong> {service.category}
-      </p>
-      <p style={{ margin: '4px 0', fontSize: '14px', color: '#666' }}>
-        {service.description}
-      </p>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px' }}>
-        <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#0066cc' }}>
-          ${service.price.toFixed(2)}
-        </span>
-        <span style={{ fontSize: '14px', color: '#999' }}>
-          {service.duration_minutes} min
-        </span>
-      </div>
-    </div>
-  )
+    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', borderRadius: 2 }} elevation={2}>
+      <CardContent sx={{ flexGrow: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+          <Typography gutterBottom variant="h6" component="h2" fontWeight="bold">
+            {service.nombre}
+          </Typography>
+          <Chip 
+            label={service.categorias_servicio?.nombre || 'General'} 
+            size="small" 
+            color="primary" 
+            variant="outlined" 
+          />
+        </Box>
+        
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          {service.descripcion}
+        </Typography>
+
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+          <Chip 
+            icon={<AttachMoneyIcon />} 
+            label={service.precio} 
+            size="small" 
+            color="success" 
+            sx={{ fontWeight: 'bold' }} 
+          />
+          <Chip 
+            icon={<AccessTimeIcon />} 
+            label={`${service.duracion_minutos} min`} 
+            size="small" 
+          />
+        </Box>
+      </CardContent>
+
+      <CardActions sx={{ px: 2, pb: 2 }}>
+        <Button 
+          component={Link} 
+          to={`/servicios/${service.id}`} 
+          variant="contained" 
+          color="primary"
+          fullWidth
+        >
+          Ver Detalles
+        </Button>
+      </CardActions>
+    </Card>
+  );
 }

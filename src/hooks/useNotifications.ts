@@ -1,139 +1,95 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
-import { useAuth } from '../context/AuthProvider'
+import { useState, useEffect, useRef } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthProvider';
 
 export interface Notification {
-  id: string
-  usuario_id: string
-  tipo: string
-  asunto: string
-  contenido: string
-  leida: boolean
-  creado_at: string
+  id: number;
+  usuario_destino_id: string;
+  tipo: string;
+  mensaje: string;
+  cita_id: number | null;
+  leida: boolean;
+  creado_at: string;
 }
 
-export const useNotifications = () => {
-  const { user } = useAuth()
-  const [notifications, setNotifications] = useState<Notification[]>([])
-  const [loading, setLoading] = useState(true)
-  const [unreadCount, setUnreadCount] = useState(0)
+export function useNotifications() {
+  const { user } = useAuth();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  // Tracks the active channel so cleanup always targets the right instance.
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
-  // Fetch notifications on mount and when user changes
+  const fetchNotifications = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('notificaciones')
+      .select('*')
+      .eq('usuario_destino_id', user.id)
+      .order('creado_at', { ascending: false });
+
+    if (data) {
+      setNotifications(data as Notification[]);
+      setUnreadCount(data.filter(n => !n.leida).length);
+    }
+  };
+
   useEffect(() => {
-    if (!user) {
-      setNotifications([])
-      setLoading(false)
-      return
-    }
+    if (!user) return;
 
-    const fetchNotifications = async () => {
-      setLoading(true)
-      const { data, error } = await supabase
-        .from('notificaciones')
-        .select('*')
-        .eq('usuario_id', user.id)
-        .order('creado_at', { ascending: false })
+    fetchNotifications();
 
-      if (error) {
-        console.error('Error fetching notifications:', error)
-      } else {
-        setNotifications(data || [])
-        const unread = (data || []).filter(n => !n.leida).length
-        setUnreadCount(unread)
+    // Use crypto.randomUUID() when available (secure contexts); fall back to
+    // Math.random() for non-secure contexts (e.g. host.docker.internal in dev).
+    const uid = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+    const channelName = `notificaciones:${user.id}:${uid}`;
+
+    // Build the channel and register the listener BEFORE calling subscribe().
+    // Supabase throws if .on() is called after .subscribe() on the same instance.
+    const channel = supabase.channel(channelName);
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notificaciones',
+        filter: `usuario_destino_id=eq.${user.id}`,
+      },
+      (payload) => {
+        setNotifications(prev => [payload.new as Notification, ...prev]);
+        setUnreadCount(prev => prev + 1);
       }
-      setLoading(false)
-    }
+    );
 
-    fetchNotifications()
-
-    // Subscribe to real-time updates
-    const subscription = supabase
-      .channel(`notifications:${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'notificaciones',
-          filter: `usuario_id=eq.${user.id}`
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setNotifications((prev) => [payload.new as Notification, ...prev])
-            setUnreadCount((prev) => prev + 1)
-          } else if (payload.eventType === 'UPDATE') {
-            setNotifications((prev) =>
-              prev.map((n) => (n.id === payload.new.id ? (payload.new as Notification) : n))
-            )
-            // Update unread count
-            const oldNotif = notifications.find((n) => n.id === payload.new.id)
-            if (oldNotif?.leida && !payload.new.leida) {
-              setUnreadCount((prev) => prev + 1)
-            } else if (!oldNotif?.leida && payload.new.leida) {
-              setUnreadCount((prev) => prev - 1)
-            }
-          } else if (payload.eventType === 'DELETE') {
-            setNotifications((prev) => prev.filter((n) => n.id !== payload.old.id))
-          }
-        }
-      )
-      .subscribe()
+    channelRef.current = channel;
+    channel.subscribe();
 
     return () => {
-      subscription.unsubscribe()
-    }
-  }, [user])
-
-  const markAsRead = async (notificationId: string) => {
-    const { error } = await supabase
-      .from('notificaciones')
-      .update({ leida: true })
-      .eq('id', notificationId)
-
-    if (error) {
-      console.error('Error marking notification as read:', error)
-    }
-  }
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, [user?.id]);
 
   const markAllAsRead = async () => {
-    const unreadIds = notifications.filter((n) => !n.leida).map((n) => n.id)
-    if (unreadIds.length === 0) return
+    if (!user || unreadCount === 0) return;
 
-    const { error } = await supabase
+    await supabase
       .from('notificaciones')
       .update({ leida: true })
-      .in('id', unreadIds)
+      .eq('usuario_destino_id', user.id)
+      .eq('leida', false);
 
-    if (error) {
-      console.error('Error marking all as read:', error)
-    }
-  }
-
-  const deleteNotification = async (notificationId: string) => {
-    const { error } = await supabase.from('notificaciones').delete().eq('id', notificationId)
-
-    if (error) {
-      console.error('Error deleting notification:', error)
-    }
-  }
-
-  const deleteAllNotifications = async () => {
-    if (!user) return
-
-    const { error } = await supabase.from('notificaciones').delete().eq('usuario_id', user.id)
-
-    if (error) {
-      console.error('Error deleting all notifications:', error)
-    }
-  }
+    fetchNotifications();
+  };
 
   return {
     notifications,
-    loading,
     unreadCount,
-    markAsRead,
     markAllAsRead,
-    deleteNotification,
-    deleteAllNotifications
-  }
+    refresh: fetchNotifications,
+  };
 }

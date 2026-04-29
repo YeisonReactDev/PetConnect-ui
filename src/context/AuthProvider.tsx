@@ -4,10 +4,12 @@ import { supabase } from '../lib/supabaseClient'
 type User = {
   id: string
   email: string | null
+  user_metadata: Record<string, any>
 }
 
 type AuthContextValue = {
   user: User | null
+  loading: boolean
   signUp: (email: string, password: string) => Promise<any>
   signIn: (email: string, password: string) => Promise<any>
   signOut: () => Promise<any>
@@ -18,18 +20,27 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
+  // Starts true so ProtectedRoute and route guards wait for the initial session check.
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Inicializar sesión
     const getUser = async () => {
       const { data } = await supabase.auth.getUser()
-      if (data?.user) setUser({ id: data.user.id, email: data.user.email })
+      if (data?.user) {
+        setUser({ id: data.user.id, email: data.user.email, user_metadata: data.user.user_metadata ?? {} })
+      }
+      // Always mark loading done after the first session check, whether or not a user was found.
+      setLoading(false)
     }
     getUser()
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) setUser({ id: session.user.id, email: session.user.email })
-      else setUser(null)
+      if (session?.user) {
+        setUser({ id: session.user.id, email: session.user.email, user_metadata: session.user.user_metadata ?? {} })
+      } else {
+        setUser(null)
+      }
+      setLoading(false)
     })
 
     return () => {
@@ -43,7 +54,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resetPassword = (email: string) => supabase.auth.resetPasswordForEmail(email)
 
   return (
-    <AuthContext.Provider value={{ user, signUp, signIn, signOut, resetPassword }}>
+    <AuthContext.Provider value={{ user, loading, signUp, signIn, signOut, resetPassword }}>
       {children}
     </AuthContext.Provider>
   )

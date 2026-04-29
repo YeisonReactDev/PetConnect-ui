@@ -1,274 +1,130 @@
-import React, { useState, useEffect } from 'react'
-import { appointmentSchema, AppointmentFormData } from '../lib/appointmentSchema'
-import { ZodError } from 'zod'
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../context/AuthProvider';
+import { Box, TextField, Button, MenuItem, Select, FormControl, InputLabel, CircularProgress, Alert } from '@mui/material';
 
-interface Pet {
-  id: string
-  name: string
-}
+export default function AppointmentForm({ 
+  servicioId, 
+  prestadorId, 
+  onSuccess 
+}: { 
+  servicioId: number, 
+  prestadorId: number, 
+  onSuccess?: () => void 
+}) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [caninos, setCaninos] = useState<any[]>([]);
+  const [caninoId, setCaninoId] = useState('');
+  const [fechaHora, setFechaHora] = useState('');
+  const [notas, setNotas] = useState('');
+  
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-interface Service {
-  id: string
-  title: string
-  duration_minutes: number
-  price: number
-}
-
-interface AppointmentFormProps {
-  services: Service[]
-  pets: Pet[]
-  onSubmit: (data: AppointmentFormData) => Promise<void>
-  isLoading?: boolean
-}
-
-export default function AppointmentForm({
-  services,
-  pets,
-  onSubmit,
-  isLoading = false
-}: AppointmentFormProps) {
-  const [formData, setFormData] = useState<Partial<AppointmentFormData>>({})
-  const [errors, setErrors] = useState<Partial<Record<keyof AppointmentFormData, string>>>({})
-  const [submitError, setSubmitError] = useState<string | null>(null)
-
-  // Calculate minimum datetime (today from now onwards)
-  const getMinDateTime = () => {
-    const now = new Date()
-    now.setMinutes(now.getMinutes() + 30) // At least 30 minutes from now
-    return now.toISOString().slice(0, 16)
-  }
-
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value
-    }))
-    // Clear error for this field when user starts typing
-    if (errors[name as keyof AppointmentFormData]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: undefined
-      }))
-    }
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitError(null)
-
-    try {
-      // Validate form data
-      const validatedData = appointmentSchema.parse(formData)
-      await onSubmit(validatedData)
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const newErrors: Partial<Record<keyof AppointmentFormData, string>> = {}
-        error.errors.forEach((err) => {
-          const path = err.path[0] as keyof AppointmentFormData
-          newErrors[path] = err.message
-        })
-        setErrors(newErrors)
-      } else {
-        setSubmitError(
-          error instanceof Error ? error.message : 'Error al procesar la solicitud'
-        )
+  useEffect(() => {
+    const fetchCaninos = async () => {
+      if (!user) return;
+      const { data: propietario } = await supabase.from('propietarios').select('id').eq('usuario_id', user.id).single();
+      
+      if (propietario) {
+        const { data } = await supabase.from('caninos').select('id, nombre').eq('propietario_id', propietario.id);
+        if (data) setCaninos(data);
       }
+    };
+    fetchCaninos();
+  }, [user]);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const { data: propietario } = await supabase.from('propietarios').select('id').eq('usuario_id', user.id).single();
+      if (!propietario) throw new Error("No se encontró el propietario");
+
+      const payload = {
+        propietario_id: propietario.id,
+        canino_id: caninoId,
+        servicio_id: servicioId,
+        prestador_id: prestadorId,
+        fecha_hora_cita: new Date(fechaHora).toISOString(),
+        notas,
+        estado: 'SOLICITADA'
+      };
+
+      const { error: insErr } = await supabase.from('citas').insert([payload]);
+      if (insErr) throw insErr;
+      
+      if (onSuccess) onSuccess();
+      navigate('/citas');
+    } catch (err: any) {
+      setError(err.message || 'Ocurrió un error al agendar la cita.');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <form onSubmit={handleSubmit} style={{ maxWidth: '600px', margin: '0 auto' }}>
-      {submitError && (
-        <div
-          style={{
-            padding: '12px',
-            backgroundColor: '#fee',
-            color: '#c33',
-            borderRadius: '4px',
-            marginBottom: '16px'
-          }}
+    <Box component="form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 2 }}>
+      {error && <Alert severity="error">{error}</Alert>}
+      
+      <FormControl fullWidth required>
+        <InputLabel id="canino-label">Selecciona tu mascota</InputLabel>
+        <Select
+          labelId="canino-label"
+          value={caninoId}
+          label="Selecciona tu mascota"
+          onChange={(e) => setCaninoId(e.target.value)}
         >
-          {submitError}
-        </div>
-      )}
+          {caninos.length === 0 ? (
+            <MenuItem value="" disabled>No tienes mascotas registradas</MenuItem>
+          ) : (
+            caninos.map((c) => (
+              <MenuItem key={c.id} value={c.id.toString()}>{c.nombre}</MenuItem>
+            ))
+          )}
+        </Select>
+      </FormControl>
 
-      {/* Service Selection */}
-      <div style={{ marginBottom: '16px' }}>
-        <label
-          style={{
-            display: 'block',
-            marginBottom: '4px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#333'
-          }}
-        >
-          Servicio *
-        </label>
-        <select
-          name="service_id"
-          value={formData.service_id || ''}
-          onChange={handleInputChange}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            border: errors.service_id ? '2px solid #c33' : '1px solid #ddd',
-            fontSize: '14px',
-            boxSizing: 'border-box'
-          }}
-        >
-          <option value="">Selecciona un servicio</option>
-          {services.map((service) => (
-            <option key={service.id} value={service.id}>
-              {service.title} - ${service.price.toFixed(2)} ({service.duration_minutes} min)
-            </option>
-          ))}
-        </select>
-        {errors.service_id && (
-          <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-            {errors.service_id}
-          </p>
-        )}
-      </div>
-
-      {/* Pet Selection */}
-      <div style={{ marginBottom: '16px' }}>
-        <label
-          style={{
-            display: 'block',
-            marginBottom: '4px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#333'
-          }}
-        >
-          Mascota *
-        </label>
-        <select
-          name="pet_id"
-          value={formData.pet_id || ''}
-          onChange={handleInputChange}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            border: errors.pet_id ? '2px solid #c33' : '1px solid #ddd',
-            fontSize: '14px',
-            boxSizing: 'border-box'
-          }}
-        >
-          <option value="">Selecciona una mascota</option>
-          {pets.map((pet) => (
-            <option key={pet.id} value={pet.id}>
-              {pet.name}
-            </option>
-          ))}
-        </select>
-        {errors.pet_id && (
-          <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-            {errors.pet_id}
-          </p>
-        )}
-      </div>
-
-      {/* DateTime Selection */}
-      <div style={{ marginBottom: '16px' }}>
-        <label
-          style={{
-            display: 'block',
-            marginBottom: '4px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#333'
-          }}
-        >
-          Fecha y hora *
-        </label>
-        <input
-          type="datetime-local"
-          name="scheduled_at"
-          value={formData.scheduled_at || ''}
-          onChange={handleInputChange}
-          min={getMinDateTime()}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            border: errors.scheduled_at ? '2px solid #c33' : '1px solid #ddd',
-            fontSize: '14px',
-            boxSizing: 'border-box'
-          }}
-        />
-        <p style={{ fontSize: '12px', color: '#999', margin: '4px 0 0 0' }}>
-          Selecciona una fecha y hora con al menos 30 minutos de anticipación
-        </p>
-        {errors.scheduled_at && (
-          <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-            {errors.scheduled_at}
-          </p>
-        )}
-      </div>
-
-      {/* Notes */}
-      <div style={{ marginBottom: '16px' }}>
-        <label
-          style={{
-            display: 'block',
-            marginBottom: '4px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#333'
-          }}
-        >
-          Notas (opcional)
-        </label>
-        <textarea
-          name="notes"
-          value={formData.notes || ''}
-          onChange={handleInputChange}
-          placeholder="Ej: Mi mascota está nerviosa con los desconocidos..."
-          rows={3}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            border: errors.notes ? '2px solid #c33' : '1px solid #ddd',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            fontFamily: 'inherit'
-          }}
-        />
-        {errors.notes && (
-          <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-            {errors.notes}
-          </p>
-        )}
-      </div>
-
-      <button
-        type="submit"
-        disabled={isLoading || services.length === 0 || pets.length === 0}
-        style={{
-          width: '100%',
-          padding: '12px',
-          backgroundColor:
-            isLoading || services.length === 0 || pets.length === 0 ? '#ccc' : '#0066cc',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          fontSize: '16px',
-          fontWeight: 'bold',
-          cursor:
-            isLoading || services.length === 0 || pets.length === 0 ? 'not-allowed' : 'pointer',
-          marginTop: '12px'
+      <TextField
+        label="Fecha y Hora"
+        type="datetime-local"
+        value={fechaHora}
+        onChange={(e) => setFechaHora(e.target.value)}
+        required
+        fullWidth
+        InputLabelProps={{
+          shrink: true,
         }}
+      />
+      
+      <TextField
+        label="Notas (opcional)"
+        multiline
+        rows={3}
+        value={notas}
+        onChange={(e) => setNotas(e.target.value)}
+        fullWidth
+        placeholder="Información adicional para el prestador..."
+      />
+
+      <Button
+        type="submit"
+        variant="contained"
+        color="primary"
+        size="large"
+        fullWidth
+        disabled={loading || !caninoId || !fechaHora}
+        startIcon={loading && <CircularProgress size={20} color="inherit" />}
+        sx={{ mt: 2 }}
       >
-        {isLoading ? 'Solicitando cita...' : 'Solicitar cita'}
-      </button>
-    </form>
-  )
+        {loading ? 'Agendando...' : 'Confirmar Cita'}
+      </Button>
+    </Box>
+  );
 }

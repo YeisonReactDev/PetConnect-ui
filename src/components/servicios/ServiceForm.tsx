@@ -1,261 +1,134 @@
-import React, { useState } from 'react'
-import { serviceSchema, ServiceFormData, SERVICE_CATEGORIES } from '../lib/serviceSchema'
-import { ZodError } from 'zod'
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../context/AuthProvider';
+import { TextField, Button, Box, MenuItem, Select, FormControl, InputLabel, CircularProgress, Alert } from '@mui/material';
 
-interface ServiceFormProps {
-  onSubmit: (data: ServiceFormData) => Promise<void>
-  initialData?: ServiceFormData
-  isLoading?: boolean
-}
+export default function ServiceForm({ existing, onSuccess }: { existing?: any, onSuccess?: () => void }) {
+  const { user } = useAuth();
+  const [nombre, setNombre] = useState(existing?.nombre || '');
+  const [descripcion, setDescripcion] = useState(existing?.descripcion || '');
+  const [precio, setPrecio] = useState(existing?.precio || '');
+  const [duracion_minutos, setDuracionMinutos] = useState(existing?.duracion_minutos || '');
+  const [categoria_id, setCategoriaId] = useState(existing?.categoria_id || '');
+  
+  const [categories, setCategories] = useState<{id: number, nombre: string}[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-export default function ServiceForm({ onSubmit, initialData, isLoading = false }: ServiceFormProps) {
-  const [formData, setFormData] = useState<Partial<ServiceFormData>>(initialData || {})
-  const [errors, setErrors] = useState<Partial<Record<keyof ServiceFormData, string>>>({})
-  const [submitError, setSubmitError] = useState<string | null>(null)
+  useEffect(() => {
+    const fetchCategories = async () => {
+      const { data } = await supabase.from('categorias_servicio').select('id, nombre');
+      if (data) setCategories(data);
+    };
+    fetchCategories();
+  }, []);
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value
-    }))
-    // Clear error for this field when user starts typing
-    if (errors[name as keyof ServiceFormData]) {
-      setErrors((prev) => ({
-        ...prev,
-        [name]: undefined
-      }))
-    }
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitError(null)
-
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    
     try {
-      const validatedData = serviceSchema.parse(formData)
-      await onSubmit(validatedData)
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const newErrors: Partial<Record<keyof ServiceFormData, string>> = {}
-        error.errors.forEach((err) => {
-          const path = err.path[0] as keyof ServiceFormData
-          newErrors[path] = err.message
-        })
-        setErrors(newErrors)
+      const { data: prestador } = await supabase.from('prestadores').select('id').eq('usuario_id', user.id).maybeSingle();
+      if (!prestador) throw new Error("Debes completar tu perfil de prestador antes de gestionar servicios.");
+
+      const payload = {
+        prestador_id: prestador.id,
+        nombre,
+        descripcion,
+        precio: parseFloat(String(precio)),
+        duracion_minutos: parseInt(String(duracion_minutos)),
+        categoria_id: parseInt(String(categoria_id)),
+        estado: 'ACTIVO'
+      };
+
+      if (existing) {
+        const { error: updErr } = await supabase.from('servicios').update(payload).eq('id', existing.id);
+        if (updErr) throw updErr;
       } else {
-        setSubmitError(
-          error instanceof Error ? error.message : 'Error al procesar el formulario'
-        )
+        const { error: insErr } = await supabase.from('servicios').insert([payload]);
+        if (insErr) throw insErr;
       }
+      
+      if (onSuccess) onSuccess();
+    } catch (err: any) {
+      setError(err.message || 'Ocurrió un error al guardar el servicio.');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <form onSubmit={handleSubmit} style={{ maxWidth: '600px', margin: '0 auto' }}>
-      {submitError && (
-        <div style={{
-          padding: '12px',
-          backgroundColor: '#fee',
-          color: '#c33',
-          borderRadius: '4px',
-          marginBottom: '16px'
-        }}>
-          {submitError}
-        </div>
-      )}
+    <Box component="form" onSubmit={submit} sx={{ display: 'flex', flexDirection: 'column', gap: 3, mt: 2 }}>
+      {error && <Alert severity="error">{error}</Alert>}
+      
+      <TextField
+        label="Nombre del Servicio"
+        value={nombre}
+        onChange={(e) => setNombre(e.target.value)}
+        required
+        fullWidth
+      />
+      
+      <TextField
+        label="Descripción"
+        multiline
+        rows={3}
+        value={descripcion}
+        onChange={(e) => setDescripcion(e.target.value)}
+        required
+        fullWidth
+      />
 
-      <div style={{ marginBottom: '16px' }}>
-        <label style={{
-          display: 'block',
-          marginBottom: '4px',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          color: '#333'
-        }}>
-          Título del servicio *
-        </label>
-        <input
-          type="text"
-          name="title"
-          value={formData.title || ''}
-          onChange={handleInputChange}
-          placeholder="Ej: Esterilización de perro mediano"
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            border: errors.title ? '2px solid #c33' : '1px solid #ddd',
-            fontSize: '14px',
-            boxSizing: 'border-box'
-          }}
-        />
-        {errors.title && (
-          <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-            {errors.title}
-          </p>
-        )}
-      </div>
-
-      <div style={{ marginBottom: '16px' }}>
-        <label style={{
-          display: 'block',
-          marginBottom: '4px',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          color: '#333'
-        }}>
-          Descripción *
-        </label>
-        <textarea
-          name="description"
-          value={formData.description || ''}
-          onChange={handleInputChange}
-          placeholder="Describe el servicio en detalle..."
-          rows={4}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            border: errors.description ? '2px solid #c33' : '1px solid #ddd',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-            fontFamily: 'inherit'
-          }}
-        />
-        {errors.description && (
-          <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-            {errors.description}
-          </p>
-        )}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-        <div>
-          <label style={{
-            display: 'block',
-            marginBottom: '4px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#333'
-          }}>
-            Precio (USD) *
-          </label>
-          <input
-            type="number"
-            name="price"
-            value={formData.price || ''}
-            onChange={handleInputChange}
-            placeholder="0.00"
-            step="0.01"
-            min="0"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              borderRadius: '4px',
-              border: errors.price ? '2px solid #c33' : '1px solid #ddd',
-              fontSize: '14px',
-              boxSizing: 'border-box'
-            }}
-          />
-          {errors.price && (
-            <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-              {errors.price}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <label style={{
-            display: 'block',
-            marginBottom: '4px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: '#333'
-          }}>
-            Duración (minutos) *
-          </label>
-          <input
-            type="number"
-            name="duration_minutes"
-            value={formData.duration_minutes || ''}
-            onChange={handleInputChange}
-            placeholder="30"
-            min="1"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              borderRadius: '4px',
-              border: errors.duration_minutes ? '2px solid #c33' : '1px solid #ddd',
-              fontSize: '14px',
-              boxSizing: 'border-box'
-            }}
-          />
-          {errors.duration_minutes && (
-            <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-              {errors.duration_minutes}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div style={{ marginBottom: '16px' }}>
-        <label style={{
-          display: 'block',
-          marginBottom: '4px',
-          fontSize: '14px',
-          fontWeight: 'bold',
-          color: '#333'
-        }}>
-          Categoría *
-        </label>
-        <select
-          name="category"
-          value={formData.category || ''}
-          onChange={handleInputChange}
-          style={{
-            width: '100%',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            border: errors.category ? '2px solid #c33' : '1px solid #ddd',
-            fontSize: '14px',
-            boxSizing: 'border-box'
-          }}
+      <FormControl fullWidth required>
+        <InputLabel id="categoria-label">Categoría</InputLabel>
+        <Select
+          labelId="categoria-label"
+          value={categoria_id}
+          label="Categoría"
+          onChange={(e) => setCategoriaId(e.target.value)}
         >
-          <option value="">Selecciona una categoría</option>
-          {SERVICE_CATEGORIES.map((cat) => (
-            <option key={cat} value={cat}>
-              {cat}
-            </option>
+          {categories.map((c) => (
+            <MenuItem key={c.id} value={c.id}>{c.nombre}</MenuItem>
           ))}
-        </select>
-        {errors.category && (
-          <p style={{ color: '#c33', fontSize: '12px', margin: '4px 0 0 0' }}>
-            {errors.category}
-          </p>
-        )}
-      </div>
+        </Select>
+      </FormControl>
 
-      <button
+      <Box sx={{ display: 'flex', gap: 2 }}>
+        <TextField
+          label="Precio ($)"
+          type="number"
+          inputProps={{ step: "0.01", min: "0" }}
+          value={precio}
+          onChange={(e) => setPrecio(e.target.value)}
+          required
+          fullWidth
+        />
+        <TextField
+          label="Duración (minutos)"
+          type="number"
+          inputProps={{ step: "1", min: "1" }}
+          value={duracion_minutos}
+          onChange={(e) => setDuracionMinutos(e.target.value)}
+          required
+          fullWidth
+        />
+      </Box>
+
+      <Button
         type="submit"
-        disabled={isLoading}
-        style={{
-          width: '100%',
-          padding: '12px',
-          backgroundColor: isLoading ? '#ccc' : '#0066cc',
-          color: 'white',
-          border: 'none',
-          borderRadius: '4px',
-          fontSize: '16px',
-          fontWeight: 'bold',
-          cursor: isLoading ? 'not-allowed' : 'pointer',
-          marginTop: '12px'
-        }}
+        variant="contained"
+        color="primary"
+        size="large"
+        fullWidth
+        disabled={loading}
+        startIcon={loading && <CircularProgress size={20} color="inherit" />}
+        sx={{ mt: 2 }}
       >
-        {isLoading ? 'Guardando...' : 'Guardar servicio'}
-      </button>
-    </form>
-  )
+        {loading ? 'Guardando...' : 'Guardar Servicio'}
+      </Button>
+    </Box>
+  );
 }

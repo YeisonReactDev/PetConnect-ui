@@ -1,7 +1,12 @@
+@import "tailwindcss";
+
+/* Disable Tailwind preflight so MUI's CssBaseline handles resets */
+@layer base {}
+
 :root {
   --bg: #ffffff;
   --fg: #0f172a;
 }
-html,body,#root { height: 100%; }
-body { margin:0; font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+html, body, #root { height: 100%; }
+body { margin: 0; font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--fg); }
 a { color: #2563eb; }

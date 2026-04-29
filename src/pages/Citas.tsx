@@ -1,308 +1,200 @@
-import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
-import AppointmentForm from '../components/servicios/AppointmentForm'
-import AppointmentCard from '../components/servicios/AppointmentCard'
-import { AppointmentFormData } from '../lib/appointmentSchema'
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthProvider';
+import AppointmentCard from '../components/servicios/AppointmentCard';
+import ValoracionForm from '../components/valoraciones/ValoracionForm';
+import {
+  Container, Typography, Box, CircularProgress, Select, MenuItem,
+  FormControl, InputLabel, Grid, Button, Snackbar, Alert, Collapse, Card, CardContent
+} from '@mui/material';
+import EventBusyIcon from '@mui/icons-material/EventBusy';
+import SearchIcon from '@mui/icons-material/Search';
+import StarIcon from '@mui/icons-material/Star';
 
-interface Pet {
-  id: string
-  name: string
-}
-
-interface Service {
-  id: string
-  title: string
-  duration_minutes: number
-  price: number
-}
-
-interface Appointment {
-  id: string
-  service_id: string
-  pet_id: string
-  scheduled_at: string
-  status: string
-  notes?: string
-  services?: { title: string; duration_minutes: number; price: number }
-  caninos?: { name: string }
-  clinics?: { name: string }
-}
+const CANCELLABLE_STATES = ['SOLICITADA', 'ACEPTADA'];
 
 export default function Citas() {
-  const navigate = useNavigate()
-  const [user, setUser] = useState<any>(null)
-  const [pets, setPets] = useState<Pet[]>([])
-  const [services, setServices] = useState<Service[]>([])
-  const [appointments, setAppointments] = useState<Appointment[]>([])
-  const [loading, setLoading] = useState(false)
-  const [formLoading, setFormLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [showForm, setShowForm] = useState(false)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const { user } = useAuth();
+  const [citas, setCitas] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('');
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [propietarioId, setPropietarioId] = useState<string | null>(null);
+  const [openReviewId, setOpenReviewId] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false, message: '', severity: 'success'
+  });
+
+  const fetchCitas = async () => {
+    if (!user) return;
+    setLoading(true);
+
+    const { data: propietario } = await supabase
+      .from('propietarios')
+      .select('id')
+      .eq('usuario_id', user.id)
+      .single();
+
+    if (propietario) {
+      setPropietarioId(propietario.id);
+      let query = supabase
+        .from('citas')
+        .select(`
+          *,
+          servicios(nombre),
+          caninos(nombre),
+          prestadores(nombre_comercial)
+        `)
+        .eq('propietario_id', propietario.id)
+        .order('fecha_hora_cita', { ascending: false });
+
+      if (filter) query = query.eq('estado', filter);
+
+      const { data } = await query;
+      if (data) setCitas(data);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const getUser = async () => {
-      const {
-        data: { user },
-        error: authError
-      } = await supabase.auth.getUser()
-      if (authError || !user) {
-        navigate('/auth')
-        return
-      }
-      setUser(user)
-      await Promise.all([
-        fetchUserPets(user.id),
-        fetchAllServices(),
-        fetchUserAppointments(user.id)
-      ])
+    fetchCitas();
+  }, [user, filter]);
+
+  const handleCancel = async (citaId: string) => {
+    setCancellingId(citaId);
+    const { error } = await supabase
+      .from('citas')
+      .update({ estado: 'CANCELADA' })
+      .eq('id', citaId);
+
+    if (error) {
+      setSnackbar({ open: true, message: 'No se pudo cancelar la cita. Intenta de nuevo.', severity: 'error' });
+    } else {
+      setSnackbar({ open: true, message: 'Cita cancelada correctamente.', severity: 'success' });
+      fetchCitas();
     }
-    getUser()
-  }, [navigate])
-
-  const fetchUserPets = async (userId: string) => {
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('caninos')
-        .select('id, name')
-        .eq('propietario_id', userId)
-        .order('creado_at', { ascending: false })
-
-      if (fetchError) throw fetchError
-      setPets(data || [])
-    } catch (err) {
-      console.error('Error fetching pets:', err)
-      setError('Error al cargar mascotas')
-    }
-  }
-
-  const fetchAllServices = async () => {
-    try {
-      const { data, error: fetchError } = await supabase
-        .from('servicios')
-        .select('id, title, duration_minutes, price')
-        .order('created_at', { ascending: false })
-
-      if (fetchError) throw fetchError
-      setServices(data || [])
-    } catch (err) {
-      console.error('Error fetching services:', err)
-      setError('Error al cargar servicios')
-    }
-  }
-
-  const fetchUserAppointments = async (userId: string) => {
-    try {
-      setLoading(true)
-      const { data, error: fetchError } = await supabase
-        .from('citas')
-        .select('*, servicios(title, duration_minutes, price), caninos(name), clinics(name)')
-        .eq('propietario_id', userId)
-        .order('scheduled_at', { ascending: false })
-
-      if (fetchError) throw fetchError
-      setAppointments(data || [])
-    } catch (err) {
-      console.error('Error fetching appointments:', err)
-      setError('Error al cargar citas')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleCreateAppointment = async (formData: AppointmentFormData) => {
-    if (!user) return
-
-    try {
-      setFormLoading(true)
-      setError(null)
-
-      const { data, error: insertError } = await supabase
-        .from('citas')
-        .insert([
-          {
-            ...formData,
-            propietario_id: user.id,
-            status: 'requested',
-            scheduled_at: new Date(formData.scheduled_at).toISOString()
-          }
-        ])
-        .select('*, servicios(title, duration_minutes, price), caninos(name), clinics(name)')
-
-      if (insertError) throw insertError
-
-      setAppointments((prev) => [data[0], ...prev])
-      setShowForm(false)
-      setSuccessMessage('¡Cita solicitada correctamente! El prestador la revisará pronto.')
-      setTimeout(() => setSuccessMessage(null), 5000)
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Error al crear la cita'
-      )
-      console.error('Error creating appointment:', err)
-    } finally {
-      setFormLoading(false)
-    }
-  }
-
-  const handleCancelAppointment = async (appointmentId: string) => {
-    if (!confirm('¿Estás seguro de que deseas cancelar esta cita?')) return
-
-    try {
-      const { error: updateError } = await supabase
-        .from('citas')
-        .update({ status: 'cancelled' })
-        .eq('id', appointmentId)
-
-      if (updateError) throw updateError
-
-      setAppointments((prev) =>
-        prev.map((apt) =>
-          apt.id === appointmentId ? { ...apt, status: 'cancelled' } : apt
-        )
-      )
-      setSuccessMessage('Cita cancelada correctamente')
-      setTimeout(() => setSuccessMessage(null), 5000)
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Error al cancelar la cita'
-      )
-      console.error('Error cancelling appointment:', err)
-    }
-  }
-
-  if (!user) {
-    return (
-      <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-        Cargando...
-      </div>
-    )
-  }
+    setCancellingId(null);
+  };
 
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
-      <h1 style={{ marginBottom: '24px', color: '#333' }}>Mis Citas</h1>
+    <Container maxWidth="md" sx={{ py: 4 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Typography variant="h4" component="h1" fontWeight="bold">
+          Mis Citas
+        </Typography>
 
-      {error && (
-        <div
-          style={{
-            padding: '12px',
-            backgroundColor: '#fee',
-            color: '#c33',
-            borderRadius: '4px',
-            marginBottom: '16px'
-          }}
-        >
-          Error: {error}
-        </div>
-      )}
-
-      {successMessage && (
-        <div
-          style={{
-            padding: '12px',
-            backgroundColor: '#efe',
-            color: '#3c3',
-            borderRadius: '4px',
-            marginBottom: '16px'
-          }}
-        >
-          {successMessage}
-        </div>
-      )}
-
-      {!showForm && (
-        <button
-          onClick={() => setShowForm(true)}
-          disabled={pets.length === 0 || services.length === 0}
-          style={{
-            padding: '10px 16px',
-            backgroundColor:
-              pets.length === 0 || services.length === 0 ? '#ccc' : '#0066cc',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            cursor:
-              pets.length === 0 || services.length === 0 ? 'not-allowed' : 'pointer',
-            marginBottom: '20px'
-          }}
-        >
-          {pets.length === 0 ? '+ Crear mascota primero' : '+ Solicitar nueva cita'}
-        </button>
-      )}
-
-      {showForm && (
-        <div
-          style={{
-            backgroundColor: '#f9f9f9',
-            padding: '20px',
-            borderRadius: '8px',
-            marginBottom: '20px'
-          }}
-        >
-          <h2 style={{ marginTop: '0' }}>Solicitar cita</h2>
-          <AppointmentForm
-            services={services}
-            pets={pets}
-            onSubmit={handleCreateAppointment}
-            isLoading={formLoading}
-          />
-          <button
-            onClick={() => setShowForm(false)}
-            style={{
-              marginTop: '12px',
-              padding: '10px 16px',
-              backgroundColor: '#ccc',
-              color: '#333',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
+        <FormControl sx={{ minWidth: 200 }} size="small">
+          <InputLabel id="filter-label">Estado</InputLabel>
+          <Select
+            labelId="filter-label"
+            value={filter}
+            label="Estado"
+            onChange={(e) => setFilter(e.target.value)}
           >
-            Cancelar
-          </button>
-        </div>
+            <MenuItem value="">Todas</MenuItem>
+            <MenuItem value="SOLICITADA">Solicitadas</MenuItem>
+            <MenuItem value="ACEPTADA">Aceptadas</MenuItem>
+            <MenuItem value="RECHAZADA">Rechazadas</MenuItem>
+            <MenuItem value="REPROGRAMADA">Reprogramadas</MenuItem>
+            <MenuItem value="COMPLETADA">Completadas</MenuItem>
+            <MenuItem value="CANCELADA">Canceladas</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
+
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <Grid container spacing={3}>
+          {citas.length === 0 ? (
+            <Grid item xs={12}>
+              <Box sx={{ textAlign: 'center', py: 10, bgcolor: 'background.paper', borderRadius: 3 }}>
+                <EventBusyIcon sx={{ fontSize: 72, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  {filter
+                    ? `No tienes citas con estado "${filter.toLowerCase()}".`
+                    : 'Aún no has agendado ninguna cita.'}
+                </Typography>
+                {!filter && (
+                  <>
+                    <Typography variant="body2" color="text.disabled" sx={{ mb: 4 }}>
+                      Explora los servicios disponibles y agenda tu primera cita.
+                    </Typography>
+                    <Button
+                      component={Link}
+                      to="/servicios"
+                      variant="contained"
+                      color="primary"
+                      size="large"
+                      startIcon={<SearchIcon />}
+                    >
+                      Explorar Servicios
+                    </Button>
+                  </>
+                )}
+              </Box>
+            </Grid>
+          ) : (
+            citas.map((cita) => (
+              <Grid item xs={12} key={cita.id}>
+                <Box>
+                  <AppointmentCard
+                    appointment={cita}
+                    canCancel={CANCELLABLE_STATES.includes(cita.estado)}
+                    onCancel={() => handleCancel(cita.id)}
+                    cancelling={cancellingId === cita.id}
+                  />
+                  {cita.estado === 'COMPLETADA' && propietarioId && (
+                    <Box sx={{ mt: 1 }}>
+                      <Button
+                        size="small"
+                        startIcon={<StarIcon />}
+                        onClick={() => setOpenReviewId(openReviewId === cita.id ? null : cita.id)}
+                        color="warning"
+                        variant={openReviewId === cita.id ? 'contained' : 'outlined'}
+                      >
+                        {openReviewId === cita.id ? 'Cerrar valoración' : 'Valorar servicio'}
+                      </Button>
+                      <Collapse in={openReviewId === cita.id}>
+                        <Card variant="outlined" sx={{ mt: 1 }}>
+                          <CardContent>
+                            <Typography variant="subtitle2" gutterBottom fontWeight="bold">
+                              Valora tu experiencia con {cita.prestadores?.nombre_comercial}
+                            </Typography>
+                            <ValoracionForm
+                              citaId={cita.id}
+                              prestadorId={cita.prestador_id}
+                              propietarioId={propietarioId}
+                              onSuccess={() => {
+                                setOpenReviewId(null);
+                                setSnackbar({ open: true, message: '¡Valoración enviada! Gracias.', severity: 'success' });
+                              }}
+                            />
+                          </CardContent>
+                        </Card>
+                      </Collapse>
+                    </Box>
+                  )}
+                </Box>
+              </Grid>
+            ))
+          )}
+        </Grid>
       )}
 
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>
-          Cargando citas...
-        </div>
-      )}
-
-      {!loading && appointments.length === 0 && !showForm && (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '40px 20px',
-            color: '#999',
-            backgroundColor: '#f9f9f9',
-            borderRadius: '4px'
-          }}
-        >
-          No tienes citas solicitadas aún. ¡Solicita una nueva!
-        </div>
-      )}
-
-      {!loading && appointments.length > 0 && (
-        <div>
-          <h2 style={{ marginTop: '24px', marginBottom: '16px' }}>
-            Tus citas ({appointments.length})
-          </h2>
-          {appointments.map((appointment) => (
-            <AppointmentCard
-              key={appointment.id}
-              appointment={appointment}
-              onCancel={handleCancelAppointment}
-              isStaff={false}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={snackbar.severity} onClose={() => setSnackbar((s) => ({ ...s, open: false }))}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Container>
+  );
 }

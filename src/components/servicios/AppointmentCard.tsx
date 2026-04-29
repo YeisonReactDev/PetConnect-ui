@@ -1,172 +1,119 @@
-import React from 'react'
-import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUS_COLORS, AppointmentStatus } from '../lib/appointmentSchema'
-
-interface Appointment {
-  id: string
-  service_id: string
-  pet_id: string
-  scheduled_at: string
-  status: AppointmentStatus
-  notes?: string
-  services?: { title: string; duration_minutes: number; price: number }
-  caninos?: { name: string }
-  clinics?: { name: string }
-  owner_id?: string
-  clinic_id?: string
-}
+import React from 'react';
+import { Card, CardContent, Typography, Chip, Box, Grid, IconButton, Tooltip, CircularProgress } from '@mui/material';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import PetsIcon from '@mui/icons-material/Pets';
+import StoreIcon from '@mui/icons-material/Store';
+import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import { APPOINTMENT_STATUS_LABELS, APPOINTMENT_STATUS_COLORS } from '../../lib/appointmentSchema';
 
 interface AppointmentCardProps {
-  appointment: Appointment
-  onAccept?: (id: string) => void
-  onDecline?: (id: string) => void
-  onCancel?: (id: string) => void
-  isStaff?: boolean
-  isLoading?: boolean
+  appointment: any;
+  isPrestador?: boolean;
+  canCancel?: boolean;
+  onCancel?: () => void;
+  cancelling?: boolean;
 }
 
 export default function AppointmentCard({
   appointment,
-  onAccept,
-  onDecline,
+  isPrestador = false,
+  canCancel = false,
   onCancel,
-  isStaff = false,
-  isLoading = false
+  cancelling = false,
 }: AppointmentCardProps) {
-  const statusLabel = APPOINTMENT_STATUS_LABELS[appointment.status]
-  const statusColor = APPOINTMENT_STATUS_COLORS[appointment.status]
-  const scheduledDate = new Date(appointment.scheduled_at)
-  const formattedDate = scheduledDate.toLocaleDateString('es-CO')
-  const formattedTime = scheduledDate.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+  const statusLabel = APPOINTMENT_STATUS_LABELS[appointment.estado as keyof typeof APPOINTMENT_STATUS_LABELS] || appointment.estado;
+  const statusColor = APPOINTMENT_STATUS_COLORS[appointment.estado as keyof typeof APPOINTMENT_STATUS_COLORS] || 'default';
 
-  const canAcceptAction =
-    (isStaff && appointment.status === 'requested') ||
-    (!isStaff && ['requested', 'accepted'].includes(appointment.status))
+  const dateObj = new Date(appointment.fecha_hora_cita);
+  const dateFormatted = new Intl.DateTimeFormat('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(dateObj);
 
   return (
-    <div
-      style={{
-        border: '1px solid #e0e0e0',
-        borderRadius: '8px',
-        padding: '16px',
-        marginBottom: '12px',
-        backgroundColor: '#fff'
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-        <div style={{ flex: 1 }}>
-          <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', color: '#333' }}>
-            {appointment.services?.title || 'Servicio desconocido'}
-          </h3>
+    <Card elevation={2} sx={{ mb: 2, borderRadius: 2, borderLeft: 6, borderColor: `${statusColor}.main` }}>
+      <CardContent>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+          <Typography variant="h6" component="div" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CalendarMonthIcon color="primary" />
+            <span style={{ textTransform: 'capitalize' }}>{dateFormatted}</span>
+          </Typography>
 
-          <p style={{ margin: '4px 0', fontSize: '14px', color: '#666' }}>
-            <strong>Mascota:</strong> {appointment.caninos?.name || 'Desconocida'}
-          </p>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
+            <Chip
+              label={statusLabel}
+              color={statusColor as any}
+              size="small"
+              sx={{ fontWeight: 'bold' }}
+            />
+            {canCancel && onCancel && (
+              <Tooltip title="Cancelar cita">
+                {/* span wrapper required so Tooltip works on disabled IconButton */}
+                <span>
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={onCancel}
+                    disabled={cancelling}
+                    aria-label="Cancelar cita"
+                  >
+                    {cancelling
+                      ? <CircularProgress size={18} color="error" />
+                      : <MoreVertIcon fontSize="small" />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+          </Box>
+        </Box>
 
-          {isStaff && (
-            <p style={{ margin: '4px 0', fontSize: '14px', color: '#666' }}>
-              <strong>Propietario:</strong> ID {appointment.owner_id}
-            </p>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
+              <MedicalServicesIcon fontSize="small" />
+              <Typography variant="body2" fontWeight="medium">
+                {appointment.servicios?.nombre || 'Servicio General'}
+              </Typography>
+            </Box>
+          </Grid>
+
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
+              <PetsIcon fontSize="small" />
+              <Typography variant="body2">
+                {appointment.caninos?.nombre || 'Mascota no especificada'}
+              </Typography>
+            </Box>
+          </Grid>
+
+          {!isPrestador && (
+            <Grid item xs={12} sm={4}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
+                <StoreIcon fontSize="small" />
+                <Typography variant="body2">
+                  {appointment.prestadores?.nombre_comercial || 'Prestador'}
+                </Typography>
+              </Box>
+            </Grid>
           )}
+        </Grid>
 
-          {!isStaff && appointment.clinics && (
-            <p style={{ margin: '4px 0', fontSize: '14px', color: '#666' }}>
-              <strong>Clínica:</strong> {appointment.clinics.name}
-            </p>
-          )}
-
-          <div style={{ display: 'flex', gap: '16px', margin: '8px 0' }}>
-            <span style={{ fontSize: '14px', color: '#666' }}>
-              📅 {formattedDate} {formattedTime}
-            </span>
-            <span style={{ fontSize: '14px', color: '#666' }}>
-              ⏱️ {appointment.services?.duration_minutes || 0} min
-            </span>
-          </div>
-
-          {appointment.notes && (
-            <p style={{ margin: '8px 0', fontSize: '13px', color: '#999', fontStyle: 'italic' }}>
-              Notas: {appointment.notes}
-            </p>
-          )}
-        </div>
-
-        <div style={{ textAlign: 'right' }}>
-          <div
-            style={{
-              display: 'inline-block',
-              padding: '6px 12px',
-              backgroundColor: statusColor,
-              color: 'white',
-              borderRadius: '4px',
-              fontSize: '12px',
-              fontWeight: 'bold',
-              marginBottom: '12px'
-            }}
-          >
-            {statusLabel}
-          </div>
-        </div>
-      </div>
-
-      {/* Action buttons for prestador */}
-      {isStaff && appointment.status === 'requested' && (
-        <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
-          <button
-            onClick={() => onAccept?.(appointment.id)}
-            disabled={isLoading}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              fontSize: '12px',
-              fontWeight: 'bold'
-            }}
-          >
-            {isLoading ? 'Procesando...' : 'Aceptar'}
-          </button>
-          <button
-            onClick={() => onDecline?.(appointment.id)}
-            disabled={isLoading}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: '#f44336',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              fontSize: '12px',
-              fontWeight: 'bold'
-            }}
-          >
-            {isLoading ? 'Procesando...' : 'Rechazar'}
-          </button>
-        </div>
-      )}
-
-      {/* Cancel button for clients */}
-      {!isStaff && canAcceptAction && (
-        <div style={{ marginTop: '12px' }}>
-          <button
-            onClick={() => onCancel?.(appointment.id)}
-            disabled={isLoading}
-            style={{
-              padding: '8px 12px',
-              backgroundColor: '#f44336',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              fontSize: '12px',
-              fontWeight: 'bold'
-            }}
-          >
-            {isLoading ? 'Procesando...' : 'Cancelar cita'}
-          </button>
-        </div>
-      )}
-    </div>
-  )
+        {appointment.notas && (
+          <Box sx={{ mt: 2, p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
+            <Typography variant="caption" color="text.secondary" display="block" fontWeight="bold">
+              Notas:
+            </Typography>
+            <Typography variant="body2" sx={{ fontStyle: 'italic' }}>
+              "{appointment.notas}"
+            </Typography>
+          </Box>
+        )}
+      </CardContent>
+    </Card>
+  );
 }

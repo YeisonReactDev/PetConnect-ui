@@ -1,151 +1,167 @@
-import React, { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { supabase } from '../lib/supabaseClient'
-
-interface Service {
-  id: string
-  title: string
-  description: string
-  price: number
-  duration_minutes: number
-  category: string
-  clinic_id: string
-  created_at: string
-  clinics?: { name: string; address: string }
-}
+import React, { useEffect, useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthProvider';
+import AppointmentForm from '../components/servicios/AppointmentForm';
+import ValoracionDisplay from '../components/valoraciones/ValoracionDisplay';
+import { Container, Typography, Card, CardContent, Button, Box, CircularProgress, Dialog, DialogTitle, DialogContent, Chip, Grid, Divider } from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import StoreIcon from '@mui/icons-material/Store';
 
 export default function ServicioDetalle() {
-  const { id } = useParams<{ id: string }>()
-  const [service, setService] = useState<Service | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { id } = useParams();
+  const { user } = useAuth();
+  const [servicio, setServicio] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [openModal, setOpenModal] = useState(false);
 
   useEffect(() => {
-    if (id) fetchService()
-  }, [id])
-
-  const fetchService = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const { data, error: fetchError } = await supabase
+    const fetchServicio = async () => {
+      if (!id) return;
+      setLoading(true);
+      const { data } = await supabase
         .from('servicios')
-        .select('*, clinics(name, address)')
+        .select(`
+          *,
+          prestadores(nombre_comercial, direccion, descripcion),
+          categorias_servicio(nombre)
+        `)
         .eq('id', id)
-        .single()
+        .single();
+      
+      setServicio(data);
+      setLoading(false);
+    };
+    fetchServicio();
+  }, [id]);
 
-      if (fetchError) throw fetchError
-      setService(data)
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Error al cargar el servicio'
-      )
-      console.error('Error fetching service:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-        Cargando servicio...
-      </div>
-    )
-  }
-
-  if (error || !service) {
-    return (
-      <div style={{ maxWidth: '600px', margin: '0 auto', padding: '20px' }}>
-        <div style={{
-          padding: '12px',
-          backgroundColor: '#fee',
-          color: '#c33',
-          borderRadius: '4px',
-          marginBottom: '16px'
-        }}>
-          {error || 'Servicio no encontrado'}
-        </div>
-        <Link to="/servicios" style={{
-          color: '#0066cc',
-          textDecoration: 'none',
-          fontSize: '14px'
-        }}>
-          ← Volver al catálogo
-        </Link>
-      </div>
-    )
-  }
+  if (loading) return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+      <CircularProgress />
+    </Box>
+  );
+  
+  if (!servicio) return (
+    <Container maxWidth="md" sx={{ py: 8, textAlign: 'center' }}>
+      <Typography variant="h6" color="error">Servicio no encontrado.</Typography>
+    </Container>
+  );
 
   return (
-    <div style={{ maxWidth: '700px', margin: '0 auto', padding: '20px' }}>
-      <Link to="/servicios" style={{
-        color: '#0066cc',
-        textDecoration: 'none',
-        fontSize: '14px',
-        marginBottom: '20px',
-        display: 'inline-block'
-      }}>
-        ← Volver al catálogo
-      </Link>
+    <Container maxWidth="md" sx={{ py: 4 }}>
+      <Button 
+        component={Link} 
+        to="/servicios" 
+        startIcon={<ArrowBackIcon />} 
+        sx={{ mb: 3 }}
+      >
+        Volver a servicios
+      </Button>
 
-      <div style={{
-        backgroundColor: '#fff',
-        border: '1px solid #e0e0e0',
-        borderRadius: '8px',
-        padding: '24px',
-        marginTop: '20px'
-      }}>
-        <h1 style={{ margin: '0 0 12px 0', color: '#333' }}>{service.title}</h1>
+      <Card elevation={3} sx={{ borderRadius: 2, mb: 4 }}>
+        <CardContent sx={{ p: { xs: 3, md: 5 } }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+            <Box>
+              <Typography variant="h3" component="h1" fontWeight="bold" gutterBottom>
+                {servicio.nombre}
+              </Typography>
+              <Chip 
+                label={servicio.categorias_servicio?.nombre || 'Categoría General'} 
+                color="primary" 
+                variant="outlined" 
+                sx={{ mt: 1 }}
+              />
+            </Box>
+            <Button 
+              variant="contained" 
+              color="primary" 
+              size="large"
+              onClick={() => setOpenModal(true)}
+              disabled={!user || user.user_metadata?.rol !== 'PROPIETARIO'}
+            >
+              Agendar Cita
+            </Button>
+          </Box>
 
-        <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#666' }}>
-          <strong>Categoría:</strong> {service.category}
-        </p>
+          {!user && (
+            <Typography variant="body2" color="warning.main" sx={{ mb: 3 }}>
+              Debes <Link to="/auth" style={{ color: 'inherit' }}>iniciar sesión</Link> como propietario para agendar una cita.
+            </Typography>
+          )}
 
-        {service.clinics && (
-          <>
-            <p style={{ margin: '0 0 4px 0', fontSize: '14px', color: '#666' }}>
-              <strong>Clínica:</strong> {service.clinics.name}
-            </p>
-            <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#666' }}>
-              <strong>Dirección:</strong> {service.clinics.address}
-            </p>
-          </>
-        )}
+          <Typography variant="h6" gutterBottom sx={{ mt: 4, mb: 2, fontWeight: 'bold' }}>
+            Descripción
+          </Typography>
+          <Typography variant="body1" color="text.secondary" paragraph sx={{ whiteSpace: 'pre-line' }}>
+            {servicio.descripcion}
+          </Typography>
 
-        <div style={{
-          backgroundColor: '#f5f5f5',
-          padding: '16px',
-          borderRadius: '4px',
-          margin: '16px 0'
-        }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div>
-              <p style={{ margin: '0 0 4px 0', fontSize: '12px', color: '#999' }}>PRECIO</p>
-              <p style={{ margin: '0', fontSize: '24px', fontWeight: 'bold', color: '#0066cc' }}>
-                ${service.price.toFixed(2)}
-              </p>
-            </div>
-            <div>
-              <p style={{ margin: '0 0 4px 0', fontSize: '12px', color: '#999' }}>DURACIÓN</p>
-              <p style={{ margin: '0', fontSize: '24px', fontWeight: 'bold', color: '#333' }}>
-                {service.duration_minutes} min
-              </p>
-            </div>
-          </div>
-        </div>
+          <Grid container spacing={3} sx={{ mt: 2 }}>
+            <Grid item xs={12} sm={6}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+                <AttachMoneyIcon color="success" fontSize="large" />
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">Precio</Typography>
+                  <Typography variant="h6" fontWeight="bold">${servicio.precio}</Typography>
+                </Box>
+              </Box>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+                <AccessTimeIcon color="info" fontSize="large" />
+                <Box>
+                  <Typography variant="caption" color="text.secondary" display="block">Duración</Typography>
+                  <Typography variant="h6" fontWeight="bold">{servicio.duracion_minutos} min</Typography>
+                </Box>
+              </Box>
+            </Grid>
+          </Grid>
 
-        <h2 style={{ fontSize: '16px', marginTop: '20px', marginBottom: '8px', color: '#333' }}>
-          Descripción
-        </h2>
-        <p style={{ color: '#666', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
-          {service.description}
-        </p>
+          <Box sx={{ mt: 6, pt: 4, borderTop: 1, borderColor: 'divider' }}>
+            <Typography variant="h5" gutterBottom fontWeight="bold" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <StoreIcon color="primary" /> 
+              Información del Prestador
+            </Typography>
+            <Typography variant="h6" gutterBottom>
+              {servicio.prestadores?.nombre_comercial}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary', mb: 2 }}>
+              <LocationOnIcon fontSize="small" />
+              <Typography variant="body2">{servicio.prestadores?.direccion || 'Dirección no especificada'}</Typography>
+            </Box>
+            {servicio.prestadores?.descripcion && (
+              <Typography variant="body2" color="text.secondary">
+                {servicio.prestadores.descripcion}
+              </Typography>
+            )}
+          </Box>
 
-        <p style={{ margin: '24px 0 0 0', fontSize: '12px', color: '#999' }}>
-          Creado: {new Date(service.created_at).toLocaleDateString('es-CO')}
-        </p>
-      </div>
-    </div>
-  )
+          <Divider sx={{ my: 4 }} />
+
+          <Box>
+            <Typography variant="h5" gutterBottom fontWeight="bold">
+              Valoraciones del Prestador
+            </Typography>
+            {servicio.prestador_id && (
+              <ValoracionDisplay prestadorId={servicio.prestador_id} />
+            )}
+          </Box>
+        </CardContent>
+      </Card>
+
+      <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Agendar Cita: {servicio.nombre}</DialogTitle>
+        <DialogContent dividers>
+          <AppointmentForm 
+            servicioId={servicio.id} 
+            prestadorId={servicio.prestador_id} 
+            onSuccess={() => setOpenModal(false)} 
+          />
+        </DialogContent>
+      </Dialog>
+    </Container>
+  );
 }
