@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,9 +16,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ── Job 1: build static files and upload as Pages artifact ──────────────────
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,6 +29,11 @@ jobs:
         with:
           node-version: '20'
 
+      # Must run before the build so base_path is available for Vite
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v4
+
       - name: Install dependencies
         run: |
           rm -f package-lock.json
@@ -35,17 +42,27 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          # actions/configure-pages outputs e.g. "/petconnect"; vite.config.ts
+          # reads this to set the correct base path for all asset URLs.
+          VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: 'dist'
 
+  # ── Job 2: deploy the artifact to GitHub Pages ───────────────────────────────
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
